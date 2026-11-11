@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "BANLY/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Odczytaj wersje z banly.sma
+        id: ver
+        run: |
+          SMA=BANLY/cstrike/addons/amxmodx/scripting/banly.sma
+          MAJOR=$(grep -oP '#define\s+VERSION_MAJOR\s+\K\d+' "$SMA" || true)
+          MINOR=$(grep -oP '#define\s+VERSION_MINOR\s+\K\d+' "$SMA" || true)
+          if [ -z "$MAJOR" ] || [ -z "$MINOR" ]; then echo "Nie znaleziono VERSION_MAJOR/VERSION_MINOR w $SMA"; exit 1; fi
+          VER="v$MAJOR.$MINOR"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Wersja: $VER"
+
+      - name: Sprawdz, czy release juz istnieje
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ steps.ver.outputs.version }} juz istnieje - pomijam."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Spakuj BANLY/
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          cd BANLY
+          zip -r "../banly-${{ steps.ver.outputs.version }}.zip" . -x "*.amxx"
+
+      - name: Utworz release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.version }}" \
+            "banly-${{ steps.ver.outputs.version }}.zip" \
+            --title "Banly.pl API ${{ steps.ver.outputs.version }}" \
+            --target "${{ github.sha }}" \
+            --generate-notes
